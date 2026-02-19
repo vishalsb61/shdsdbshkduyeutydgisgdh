@@ -1,0 +1,113 @@
+# ==========================================
+# Namespace
+# ==========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: red-dev
+  labels:
+    app: red-parquet-audit-poc
+---
+# ==========================================
+# Deployment (no TLS mounts, no mounts)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: red-parquet-audit-poc
+  namespace: red-dev
+  labels:
+    app: red-parquet-audit-poc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: red-parquet-audit-poc
+  template:
+    metadata:
+      labels:
+        app: red-parquet-audit-poc
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: api
+          image: registry.gbis.azure-socgen.com/red/red-parquet-audit-poc:{{IMAGE_TAG}}
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ASPNETCORE_URLS
+              value: http://0.0.0.0:8080
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+      imagePullSecrets:
+        - name: harbor
+---
+# ==========================================
+# Service
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: red-parquet-audit-poc
+  namespace: red-dev
+  labels:
+    app: red-parquet-audit-poc
+spec:
+  selector:
+    app: red-parquet-audit-poc
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: http
+  type: ClusterIP
+---
+# ==========================================
+# Ingress
+# ==========================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: red-parquet-audit-poc-ingress
+  namespace: red-dev
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - red-parquet-audit-poc.red.dev.euw.gbis.sg-azure.com
+      secretName: reddev-wild-tls
+  rules:
+    - host: red-parquet-audit-poc.red.dev.euw.gbis.sg-azure.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: red-parquet-audit-poc
+                port:
+                  number: 80
