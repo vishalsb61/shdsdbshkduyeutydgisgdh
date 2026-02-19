@@ -1,0 +1,115 @@
+# ==========================================
+# Namespace
+# ==========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: red-dev
+  labels:
+    app: parquet-audit-api
+---
+# ==========================================
+# Deployment (no TLS mounts, no mounts)
+# ==========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parquet-audit-api
+  namespace: red-dev
+  labels:
+    app: parquet-audit-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: parquet-audit-api
+  template:
+    metadata:
+      labels:
+        app: parquet-audit-api
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: api
+          image: registry.gbis.azure-socgen.com/red/parquet-audit-api:{{IMAGE_TAG}}
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ASPNETCORE_URLS
+              value: http://0.0.0.0:8080
+          startupProbe:
+            httpGet:
+              path: /swagger/index.html
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /swagger/index.html
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+      imagePullSecrets:
+        - name: harbor
+---
+# ==========================================
+# Service
+# ==========================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: parquet-audit-api
+  namespace: red-dev
+  labels:
+    app: parquet-audit-api
+spec:
+  selector:
+    app: parquet-audit-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: http
+  type: ClusterIP
+---
+# ==========================================
+# Ingress
+# ==========================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: parquet-audit-api-ingress
+  namespace: red-dev
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - parquet-audit.red.dev.euw.gbis.sg-azure.com
+      secretName: reddev-wild-tls
+  rules:
+    - host: parquet-audit.red.dev.euw.gbis.sg-azure.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: parquet-audit-api
+                port:
+                  number: 80
